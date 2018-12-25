@@ -50,12 +50,14 @@ class HdKeyring extends EventEmitter {
     }
 
     const oldLen = this.wallets.length
-    const newWallets = []
+    const newWallets = this.wallets
     for (let i = oldLen; i < numberOfAccounts + oldLen; i++) {
       const child = this.root.deriveChild(i)
       const wallet = child.getWallet()
       newWallets.push(wallet)
-      this.wallets.push(wallet)
+      if (!this.wallets.includes(wallet)) {
+        this.wallets.push(wallet)
+      }
     }
     const hexWallets = newWallets.map((w) => {
       return sigUtil.normalize(w.getAddress().toString('hex'))
