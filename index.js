@@ -123,6 +123,10 @@ class HdKeyring extends EventEmitter {
     return Promise.resolve(wallet.getPrivateKey().toString('hex'))
   }
 
+  setHdPath (hdPath) {
+    this.hdPath = hdPath
+  }
+
 
   /* PRIVATE METHODS */
 
