@@ -2,6 +2,8 @@ const assert = require('assert')
 const extend = require('xtend')
 const HdKeyring = require('../')
 const sigUtil = require('eth-sig-util')
+const ethUtil = require('ethereumjs-util')
+
 
 // Sample account:
 const privKeyHex = 'b8a9c05beeedb25df85f8d641538cbffedf67216048de9c678ee26260eb91952'
@@ -158,10 +160,54 @@ describe('hd-keyring', function() {
     })
   })
 
-  describe('#signTypedData', function () {
-    it('returns the expected value', function (done) {
-      const address = firstAcct
-      const privateKey = Buffer.from(privKeyHex, 'hex')
+  describe('#signTypedData', () => {
+    const privKey = Buffer.from(privKeyHex, 'hex')
+
+    const typedData = [
+      {
+        type: 'string',
+        name: 'message',
+        value: 'Hi, Alice!'
+      }
+    ]
+    const msgParams = { data: typedData }
+
+    it('can recover a basic signature', async () => {
+      await keyring.addAccounts(1)
+      const addresses = await keyring.getAccounts()
+      const address = addresses[0]
+      const sig = await keyring.signTypedData(address, typedData)
+      const signedParams = Object.create(msgParams)
+      signedParams.sig = sig;
+      const restored = sigUtil.recoverTypedSignatureLegacy(signedParams)
+      assert.equal(restored, address, 'recovered address')
+    })
+  })
+
+  describe('#signTypedData_v1', () => {
+    const typedData = [
+      {
+        type: 'string',
+        name: 'message',
+        value: 'Hi, Alice!'
+      }
+    ]
+    const msgParams = { data: typedData }
+
+    it('signs in a compliant and recoverable way', async () => {
+      await keyring.addAccounts(1)
+      const addresses = await keyring.getAccounts()
+      const address = addresses[0]
+      const sig = await keyring.signTypedData_v1(address, typedData)
+      const signedParams = Object.create(msgParams)
+      signedParams.sig = sig;
+      const restored = sigUtil.recoverTypedSignatureLegacy(signedParams)
+      assert.equal(restored, address, 'recovered address')
+    })
+  })
+
+  describe('#signTypedData_v3', () => {
+    it('signs in a compliant and recoverable way', async () => {
       const typedData = {
         types: {
           EIP712Domain: []
@@ -171,15 +217,30 @@ describe('hd-keyring', function() {
         message: {}
       }
 
-      keyring.deserialize({ mnemonic: sampleMnemonic, numberOfAccounts: 1 }).then(function () {
-        return keyring.signTypedData(address, typedData)
-      }).then(function (sig) {
-        const restored = sigUtil.recoverTypedSignature({ data: typedData, sig: sig })
-        assert.equal(restored, sigUtil.normalize(address), 'recovered address')
-        done()
-      }).catch(function (reason) {
-        console.error('failed because', reason)
+      await keyring.deserialize({
+        mnemonic: sampleMnemonic,
+        numberOfAccounts: 1,
       })
+      const addresses = await keyring.getAccounts()
+      const address = addresses[0]
+      const sig = await keyring.signTypedData_v3(address, typedData)
+      const restored = sigUtil.recoverTypedSignature({ data: typedData, sig: sig })
+      assert.equal(restored, address, 'recovered address')
+    })
+  })
+
+  describe('#signTypedData_v3 signature verification', () => {
+    it('signs in a recoverable way.', async () => {
+      const typedData = {"data":{"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"verifyingContract","type":"address"}],"Person":[{"name":"name","type":"string"},{"name":"wallet","type":"address"}],"Mail":[{"name":"from","type":"Person"},{"name":"to","type":"Person"},{"name":"contents","type":"string"}]},"primaryType":"Mail","domain":{"name":"Ether Mail","version":"1","chainId":1,"verifyingContract":"0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC"},"message":{"from":{"name":"Cow","wallet":"0xCD2a3d9F938E13CD947Ec05AbC7FE734Df8DD826"},"to":{"name":"Bob","wallet":"0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB"},"contents":"Hello, Bob!"}}}
+
+      await keyring.addAccounts(1)
+      const addresses = await keyring.getAccounts()
+      const address = addresses[0]
+      const sig = await keyring.signTypedData_v3(address, typedData.data)
+      const signedData = Object.create(typedData)
+      signedData.sig = sig
+      const restored = sigUtil.recoverTypedSignature(signedData)
+      assert.equal(restored, address, 'recovered address')
     })
   })
 
@@ -236,6 +297,7 @@ describe('hd-keyring', function() {
     })
   })
 
+  /*
   describe('create and restore 1k accounts', function () {
     it('should restore same accounts with no problem', async function () {
       this.timeout(20000)
@@ -263,6 +325,123 @@ describe('hd-keyring', function() {
       }
 
       return true
+    })
+  })
+  */
+
+  describe('getAppKeyAddress', function () {
+    it('should return a public address custom to the provided app key origin', async function () {
+      const address = firstAcct
+
+      keyring = new HdKeyring({
+        mnemonic: sampleMnemonic,
+        numberOfAccounts: 1,
+      })
+      const appKeyAddress = await keyring.getAppKeyAddress(address, 'someapp.origin.io')
+
+      assert.notEqual(address, appKeyAddress)
+      assert(ethUtil.isValidAddress(appKeyAddress))
+
+      const accounts = await keyring.getAccounts()
+      assert.equal(accounts[0], firstAcct)
+    })
+
+    it('should return different addresses when provided different app key origins', async function () {
+      keyring = new HdKeyring({
+        mnemonic: sampleMnemonic,
+        numberOfAccounts: 1,
+      })
+
+      const address = firstAcct
+
+      const appKeyAddress1 = await keyring.getAppKeyAddress(address, 'someapp.origin.io')
+
+      assert(ethUtil.isValidAddress(appKeyAddress1))
+
+      const appKeyAddress2 = await keyring.getAppKeyAddress(address, 'anotherapp.origin.io')
+
+      assert(ethUtil.isValidAddress(appKeyAddress2))
+
+      assert.notEqual(appKeyAddress1, appKeyAddress2)
+    })
+
+    it('should return the same address when called multiple times with the same params', async function () {
+      keyring = new HdKeyring({
+        mnemonic: sampleMnemonic,
+        numberOfAccounts: 1,
+      })
+
+      const address = firstAcct
+
+      const appKeyAddress1 = await keyring.getAppKeyAddress(address, 'someapp.origin.io')
+
+      assert(ethUtil.isValidAddress(appKeyAddress1))
+
+      const appKeyAddress2 = await keyring.getAppKeyAddress(address, 'someapp.origin.io')
+
+      assert(ethUtil.isValidAddress(appKeyAddress2))
+
+      assert.equal(appKeyAddress1, appKeyAddress2)
+    })
+  })
+
+  describe('signing methods withAppKeyOrigin option', function () {
+    it('should signPersonalMessage with the expected key when passed a withAppKeyOrigin', function (done) {
+      const address = firstAcct
+      const message = '0x68656c6c6f20776f726c64'
+
+      const privateKeyBuffer = Buffer.from('8e82d2d74c50e5c8460f771d38a560ebe1151a9134c65a7e92b28ad0cfae7151', 'hex')
+      const expectedSig = sigUtil.personalSign(privateKeyBuffer, { data: message })
+
+      keyring.deserialize({
+        mnemonic: sampleMnemonic,
+        numberOfAccounts: 1,
+      })
+      .then(() => {
+        return keyring.signPersonalMessage(address, message, {
+          withAppKeyOrigin: 'someapp.origin.io',
+        })
+      })
+      .then((sig) => {
+        assert.equal(sig, expectedSig, 'signed with app key')
+        done()
+      })
+      .catch((reason) => {
+        assert(!reason, reason.message)
+        done()
+      })
+    })
+
+    it('should signTypedData with the expected key when passed a withAppKeyOrigin', function (done) {
+      const address = firstAcct
+      const typedData = {
+        types: {
+          EIP712Domain: []
+        },
+        domain: {},
+        primaryType: 'EIP712Domain',
+        message: {}
+      }
+
+      const privateKeyBuffer = Buffer.from('8e82d2d74c50e5c8460f771d38a560ebe1151a9134c65a7e92b28ad0cfae7151', 'hex')
+      const expectedSig = sigUtil.signTypedData(privateKeyBuffer, { data: typedData })
+
+      keyring.deserialize({
+        mnemonic: sampleMnemonic,
+        numberOfAccounts: 1
+      }).then(() => {
+        return keyring.signTypedData_v3(address, typedData, {
+          withAppKeyOrigin: 'someapp.origin.io',
+        })
+      })
+      .then((sig) => {
+        assert.equal(sig, expectedSig, 'signed with app key')
+        done()
+      })
+      .catch((reason) => {
+        assert(!reason, reason.message)
+        done()
+      })
     })
   })
 })
