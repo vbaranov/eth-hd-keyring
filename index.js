@@ -74,6 +74,7 @@ class HdKeyring extends SimpleKeyring {
 
   setHdPath (hdPath) {
     this.hdPath = hdPath
+    this.opts = Object.assign(this.opts, {hdPath: hdPath})
   }
 
 
